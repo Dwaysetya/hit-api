@@ -9,9 +9,20 @@ export const syncODP = async (token, odp_name) => {
     });
     return response.data;
   } catch (error) {
-    console.error(`Sync ODP error for ${odp_name}:`, error);
-    // Return structured error instead of throwing to avoid breaking the loop if not handled properly
-    // We handle this gracefully in the loop, but rejecting here is also fine since we use try/catch in the loop
-    throw error.response?.data || error.message || 'Unknown error';
+    // Log as a string with warn instead of error object to avoid Next.js Error Overlay blocking the screen
+    console.warn(`Sync ODP error for ${odp_name}: ${error.message || 'Unknown error'}`);
+    
+    // Explicitly handle 404 errors as they often mean the ODP doesn't exist
+    if (error.response?.status === 404) {
+      throw `ODP not found or endpoint unavailable (404)`;
+    }
+
+    // Try to get a clean error message from the response data
+    const errorData = error.response?.data;
+    if (errorData && typeof errorData === 'object' && errorData.message) {
+      throw errorData.message;
+    }
+    
+    throw errorData || error.message || 'Unknown error';
   }
 };

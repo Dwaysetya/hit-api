@@ -20,6 +20,7 @@ export default function Home() {
   const [isFinished, setIsFinished] = useState(false);
   const [results, setResults] = useState([]);
   const [stats, setStats] = useState({ total: 0, success: 0, failed: 0, timeElapsed: '0s' });
+  const [singleOdp, setSingleOdp] = useState('');
   
   const fileInputRef = useRef(null);
 
@@ -43,6 +44,7 @@ export default function Home() {
     setAuthToken('');
     setPassword('');
     setOdpList([]);
+    setSingleOdp('');
     setResults([]);
     setIsFinished(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -65,7 +67,7 @@ export default function Home() {
         setStats(prev => ({ ...prev, total: parsedList.length }));
         setIsFinished(false);
       } catch (error) {
-        alert(error.message || 'Failed to read Excel file.');
+        alert(error.message || 'Failed to read file.');
         setFile(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
@@ -112,10 +114,11 @@ export default function Home() {
         };
         currentSuccess++;
       } catch (error) {
+        const errorMessage = typeof error === 'string' ? error : (error.message || 'Error occurred');
         updatedResults[i] = {
           ...updatedResults[i],
           Status: 'Failed',
-          Message: typeof error === 'string' ? error : (error.message || 'Error occurred'),
+          Message: `Error (${errorMessage})`,
           Timestamp: execTimeStr
         };
         currentFailed++;
@@ -137,6 +140,74 @@ export default function Home() {
       timeElapsed: `${((endTime - startTime) / 1000).toFixed(1)}s`
     }));
 
+    setIsRunning(false);
+    setIsFinished(true);
+  };
+
+  const handleSingleExecute = async () => {
+    if (!singleOdp.trim()) return alert('Please enter at least one ODP name.');
+    if (!authToken) return alert('Not authenticated.');
+
+    setIsRunning(true);
+    setIsFinished(false);
+    
+    // Split input by newlines, trim whitespace, and filter out empty lines
+    const rawList = singleOdp.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+    
+    if (rawList.length === 0) {
+      setIsRunning(false);
+      return alert('No valid ODP names found.');
+    }
+
+    setStats({ total: rawList.length, success: 0, failed: 0, timeElapsed: '0s' });
+    
+    const startTime = Date.now();
+    let currentSuccess = 0;
+    let currentFailed = 0;
+
+    let updatedResults = rawList.map((odp, index) => ({
+      No: index + 1,
+      ODP: odp,
+      Status: 'Pending',
+      Message: '-',
+      Timestamp: '-'
+    }));
+    
+    setResults([...updatedResults]);
+
+    for (let i = 0; i < rawList.length; i++) {
+      const odpName = rawList[i];
+      const execTimeStr = new Date().toLocaleTimeString();
+      try {
+        const response = await syncODP(authToken, odpName);
+        updatedResults[i] = {
+          ...updatedResults[i],
+          Status: 'Success',
+          Message: response?.message || 'Success',
+          Timestamp: execTimeStr
+        };
+        currentSuccess++;
+      } catch (error) {
+        const errorMessage = typeof error === 'string' ? error : (error.message || 'Error occurred');
+        updatedResults[i] = {
+          ...updatedResults[i],
+          Status: 'Failed',
+          Message: `Error (${errorMessage})`,
+          Timestamp: execTimeStr
+        };
+        currentFailed++;
+      }
+      
+      setResults([...updatedResults]);
+      setStats(prev => ({ 
+        ...prev, 
+        success: currentSuccess, 
+        failed: currentFailed, 
+        timeElapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` 
+      }));
+    }
+    
+    setStats(prev => ({ ...prev, timeElapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` }));
     setIsRunning(false);
     setIsFinished(true);
   };
@@ -202,7 +273,7 @@ export default function Home() {
         ) : (
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>2. Upload Data</h2>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>2. Execution Setup</h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <span className="badge badge-success" style={{ fontSize: '0.875rem' }}>✓ Logged in as {username}</span>
                 <button 
@@ -216,22 +287,61 @@ export default function Home() {
               </div>
             </div>
             
-            <div className="form-group">
-              <label>Excel File (.xlsx)</label>
-              <input
-                type="file"
-                accept=".xlsx, .xls"
-                className="form-control"
-                onChange={handleFileChange}
-                ref={fileInputRef}
-                disabled={isRunning}
-              />
+            <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+              {/* Manual Input */}
+              <div style={{ flex: '1 1 300px', padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 600 }}>A. Manual Input ODP</h3>
+                <div className="form-group">
+                  <label>ODP Name (Pisahkan dengan Enter)</label>
+                  <textarea
+                    className="form-control"
+                    placeholder="Contoh:&#10;ODP-TBI-FA/82&#10;ODP-JBS-FF/012"
+                    rows={5}
+                    value={singleOdp}
+                    onChange={(e) => setSingleOdp(e.target.value)}
+                    disabled={isRunning}
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+                <button 
+                  className="btn" 
+                  onClick={handleSingleExecute}
+                  disabled={!singleOdp.trim() || isRunning}
+                  style={{ width: '100%' }}
+                >
+                  Check ODP
+                </button>
+              </div>
+
+              {/* Batch Upload */}
+              <div style={{ flex: '1 1 300px', padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem', fontWeight: 600 }}>B. Batch Upload</h3>
+                <div className="form-group">
+                  <label>File (.xlsx, .csv, .txt)</label>
+                  <input
+                    type="file"
+                    accept=".xlsx, .xls, .csv, .txt"
+                    className="form-control"
+                    onChange={handleFileChange}
+                    ref={fileInputRef}
+                    disabled={isRunning}
+                  />
+                </div>
+                {odpList.length > 0 && (
+                  <p style={{ color: 'var(--success)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                    ✓ Loaded {odpList.length} ODP records successfully.
+                  </p>
+                )}
+                <button
+                  className="btn"
+                  onClick={handleExecute}
+                  disabled={odpList.length === 0 || isRunning}
+                  style={{ width: '100%' }}
+                >
+                  Start Batch Sync
+                </button>
+              </div>
             </div>
-            {odpList.length > 0 && (
-              <p style={{ color: 'var(--success)', fontSize: '0.875rem' }}>
-                ✓ Loaded {odpList.length} ODP records successfully.
-              </p>
-            )}
           </div>
         )}
       </div>
@@ -239,24 +349,13 @@ export default function Home() {
       {authToken && (
         <>
           <div style={{ textAlign: 'center', margin: '2rem 0' }}>
-            {!isRunning && !isFinished && (
-              <button
-                className="btn"
-                onClick={handleExecute}
-                disabled={odpList.length === 0}
-                style={{ width: '200px' }}
-              >
-                Start Sync
-              </button>
-            )}
-            
             {isRunning && (
               <button className="btn" disabled style={{ width: '200px' }}>
                 <span style={{ marginRight: '0.5rem' }}>⏳</span> Processing...
               </button>
             )}
 
-            {isFinished && (
+            {isFinished && !isRunning && (
               <button className="btn btn-success" onClick={handleDownload} style={{ width: '250px' }}>
                 ↓ Download Results (.xlsx)
               </button>
